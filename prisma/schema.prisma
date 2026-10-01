@@ -1,0 +1,435 @@
+// Escloud - Private Cloud / Media Management Platform
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "mysql"
+  url      = env("DATABASE_URL")
+}
+
+// ---------------------------------------------------------------------------
+// USERS, ROLES, PERMISSIONS
+// ---------------------------------------------------------------------------
+
+model User {
+  id              String   @id @default(cuid())
+  username        String   @unique
+  email           String   @unique
+  passwordHash    String
+  displayName     String?
+  phone           String?
+  avatarPath      String?
+  role            String   @default("user") // "user" | "admin"
+  status          String   @default("active") // "active" | "suspended" | "deleted"
+  mustChangePwd   Boolean  @default(false)
+  permissions     String   @db.VarChar(5000) @default("") // JSON-encoded string of permission keys
+  storageQuota    BigInt   @default(10737418240) // 10 GB default
+  uploadMaxBytes  BigInt   @default(2147483648) // 2 GB per file
+  downloadMaxBytes BigInt @default(0) // 0 = unlimited
+  dailyUploadLimit BigInt  @default(5368709120) // 5 GB / day
+  dailyDownloadLimit BigInt @default(0) // 0 = unlimited
+  uploadEnabled   Boolean  @default(true)
+  downloadEnabled Boolean  @default(true)
+  approvalRequired Boolean @default(false) // user uploads require admin approval
+  expiresAt       DateTime?
+  createdAt       DateTime @default(now())
+  updatedAt       DateTime @updatedAt
+
+  sessions        Session[]
+  mediaOwned      Media[]            @relation("MediaOwner")
+  privateAccess   PrivateAccess[]
+  favorites       Favorite[]
+  watchHistory    WatchHistory[]
+  downloads       DownloadRecord[]
+  uploads         Upload[]
+  qrSessions      QRLoginSession[]
+  adminLogs       AdminActivityLog[] @relation("AdminActor")
+  adminTargetLogs AdminActivityLog[] @relation("AdminTarget")
+  notifications   Notification[]
+  impersonations  Impersonation[]    @relation("Impersonator")
+  impersonatedBy  Impersonation[]    @relation("ImpersonatedUser")
+}
+
+model Session {
+  id          String   @id @default(cuid())
+  userId      String
+  user        User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  token       String   @unique
+  device      String?
+  browser     String?
+  ip          String?
+  lastActive  DateTime @default(now())
+  expiresAt   DateTime
+  createdAt   DateTime @default(now())
+
+  @@index([userId])
+  @@index([token])
+}
+
+model Impersonation {
+  id           String   @id @default(cuid())
+  adminId       String
+  admin         User     @relation("Impersonator", fields: [adminId], references: [id])
+  userId        String
+  user          User     @relation("ImpersonatedUser", fields: [userId], references: [id])
+  token         String   @unique
+  startedAt     DateTime @default(now())
+  endedAt       DateTime?
+  reason        String?
+
+  @@index([adminId])
+  @@index([userId])
+}
+
+model QRLoginSession {
+  id          String    @id @default(cuid())
+  token       String    @unique
+  status      String    @default("pending") // "pending" | "authorized" | "used" | "expired"
+  userId      String?
+  user         User?     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  expiresAt   DateTime
+  createdAt   DateTime  @default(now())
+  authorizedAt DateTime?
+  usedAt      DateTime?
+  ip          String?
+
+  @@index([token])
+  @@index([userId])
+}
+
+// ---------------------------------------------------------------------------
+// MEDIA (Videos / Photos / Documents / Contacts share the base table)
+// ---------------------------------------------------------------------------
+
+model Media {
+  id           String   @id @default(cuid())
+  type         String   // "video" | "photo" | "document" | "contact"
+  name         String
+  originalName String
+  mimeType     String
+  size         BigInt
+  // Visibility: "public" (all authorized users can see), "private" (only assigned users)
+  visibility   String   @default("public")
+  status       String   @default("ready") // "pending" | "processing" | "ready" | "failed"
+  approvalStatus String @default("approved") // "pending" | "approved" | "rejected"
+  ownerId      String
+  owner        User     @relation("MediaOwner", fields: [ownerId], references: [id], onDelete: Cascade)
+  // Storage paths (relative to storage root)
+  storagePath  String   // original file path
+  thumbnailPath String?
+  // Video specific
+  duration     Float?
+  width        Int?
+  height       Int?
+  resolution   String?  // "1080p" | "720p" | "480p"
+  // HLS for videos
+  hlsPath      String?
+  // Photo specific
+  exifData     String? @db.Text
+  // Document specific
+  docType      String?  // "pdf" | "doc" | "docx" | "xls" | "xlsx" | "ppt" | "pptx" | "txt" | "csv" | "zip" | "rar" | "7z" | "apk" | "other"
+  // Contact specific
+  contactName  String?
+  contactCount Int?
+  // Folder / Album / Tags
+  folderId     String?
+  folder       Folder?  @relation(fields: [folderId], references: [id], onDelete: SetNull)
+  // Hash for dedup
+  sha256       String?
+  createdAt    DateTime @default(now())
+  updatedAt    DateTime @updatedAt
+
+  albums       AlbumMedia[]
+  tags        MediaTag[]
+  privateAccess PrivateAccess[]
+  favorites   Favorite[]
+  watchHistory WatchHistory[]
+  downloads   DownloadRecord[]
+  processingJobs VideoProcessingJob[]
+
+  @@index([ownerId])
+  @@index([type])
+  @@index([visibility])
+  @@index([docType])
+  @@index([folderId])
+  @@index([createdAt])
+  @@index([status])
+}
+
+model Folder {
+  id        String   @id @default(cuid())
+  name      String
+  ownerId   String
+  parentId  String?
+  parent    Folder?  @relation("FolderChildren", fields: [parentId], references: [id], onDelete: Cascade)
+  children  Folder[] @relation("FolderChildren")
+  media     Media[]
+  type      String   @default("generic") // "generic" | "videos" | "photos" | "documents" | "contacts"
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@index([ownerId])
+  @@index([parentId])
+}
+
+model Album {
+  id        String   @id @default(cuid())
+  name      String
+  description String?
+  coverMediaId String?
+  ownerId   String
+  type      String   @default("generic") // "generic" | "videos" | "photos"
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  media AlbumMedia[]
+
+  @@index([ownerId])
+}
+
+model AlbumMedia {
+  id        String   @id @default(cuid())
+  albumId   String
+  album     Album    @relation(fields: [albumId], references: [id], onDelete: Cascade)
+  mediaId   String
+  media     Media    @relation(fields: [mediaId], references: [id], onDelete: Cascade)
+  order     Int      @default(0)
+  addedAt   DateTime @default(now())
+
+  @@unique([albumId, mediaId])
+  @@index([albumId])
+  @@index([mediaId])
+}
+
+model Tag {
+  id    String   @id @default(cuid())
+  name  String
+  media MediaTag[]
+
+  @@unique([name])
+}
+
+model MediaTag {
+  id      String @id @default(cuid())
+  mediaId String
+  media   Media  @relation(fields: [mediaId], references: [id], onDelete: Cascade)
+  tagId   String
+  tag     Tag    @relation(fields: [tagId], references: [id], onDelete: Cascade)
+
+  @@unique([mediaId, tagId])
+  @@index([mediaId])
+  @@index([tagId])
+}
+
+model PrivateAccess {
+  id        String   @id @default(cuid())
+  mediaId   String
+  media     Media    @relation(fields: [mediaId], references: [id], onDelete: Cascade)
+  userId    String
+  user      User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  grantedAt DateTime @default(now())
+  grantedBy String?
+
+  @@unique([mediaId, userId])
+  @@index([mediaId])
+  @@index([userId])
+}
+
+// ---------------------------------------------------------------------------
+// UPLOADS (chunked / resumable)
+// ---------------------------------------------------------------------------
+
+model Upload {
+  id           String   @id @default(cuid())
+  userId       String
+  user         User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  filename     String
+  fileSize     BigInt
+  mimeType     String
+  mediaType    String   // "video" | "photo" | "document" | "contact"
+  totalChunks  Int
+  receivedChunks Int    @default(0)
+  storagePath  String
+  status       String   @default("waiting") // "waiting" | "uploading" | "completed" | "failed" | "cancelled" | "paused"
+  sha256       String?
+  mediaId      String?  // created Media record after completion
+  errorMessage  String? @db.Text
+  startedAt    DateTime @default(now())
+  completedAt  DateTime?
+  updatedAt    DateTime @updatedAt
+
+  chunks       UploadChunk[]
+
+  @@index([userId])
+  @@index([status])
+}
+
+model UploadChunk {
+  id        String   @id @default(cuid())
+  uploadId  String
+  upload    Upload   @relation(fields: [uploadId], references: [id], onDelete: Cascade)
+  index     Int
+  size      BigInt
+  sha256    String?
+  received  Boolean  @default(false)
+  receivedAt DateTime?
+
+  @@unique([uploadId, index])
+  @@index([uploadId])
+}
+
+model VideoProcessingJob {
+  id        String   @id @default(cuid())
+  mediaId   String
+  media     Media    @relation(fields: [mediaId], references: [id], onDelete: Cascade)
+  status    String   @default("queued") // "queued" | "processing" | "completed" | "failed"
+  progress  Int      @default(0)
+  qualities String   @db.VarChar(1000) @default("") // JSON array e.g. ["1080p","720p","480p"]
+  thumbnailPath String?
+  hlsPath   String?
+  errorMessage String? @db.Text
+  startedAt DateTime?
+  completedAt DateTime?
+  createdAt DateTime @default(now())
+
+  @@index([mediaId])
+  @@index([status])
+}
+
+// ---------------------------------------------------------------------------
+// USER ACTIVITY: WATCH HISTORY, FAVORITES, DOWNLOADS
+// ---------------------------------------------------------------------------
+
+model WatchHistory {
+  id          String   @id @default(cuid())
+  userId      String
+  user        User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  mediaId     String
+  media       Media    @relation(fields: [mediaId], references: [id], onDelete: Cascade)
+  position    Float    @default(0) // seconds
+  duration    Float?
+  watchedAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  @@unique([userId, mediaId])
+  @@index([userId])
+  @@index([mediaId])
+}
+
+model Favorite {
+  id        String   @id @default(cuid())
+  userId    String
+  user      User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  mediaId   String
+  media     Media    @relation(fields: [mediaId], references: [id], onDelete: Cascade)
+  createdAt DateTime @default(now())
+
+  @@unique([userId, mediaId])
+  @@index([userId])
+  @@index([mediaId])
+}
+
+model DownloadRecord {
+  id          String   @id @default(cuid())
+  userId      String
+  user        User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  mediaId     String
+  media       Media    @relation(fields: [mediaId], references: [id], onDelete: Cascade)
+  bytes       BigInt
+  ip          String?
+  userAgent   String?
+  createdAt    DateTime @default(now())
+
+  @@index([userId])
+  @@index([mediaId])
+  @@index([createdAt])
+}
+
+// ---------------------------------------------------------------------------
+// ADMIN: ACTIVITY LOG, NOTIFICATIONS, SETTINGS
+// ---------------------------------------------------------------------------
+
+model AdminActivityLog {
+  id          String   @id @default(cuid())
+  adminId     String
+  admin       User     @relation("AdminActor", fields: [adminId], references: [id])
+  targetUserId String?
+  target      User?    @relation("AdminTarget", fields: [targetUserId], references: [id])
+  action      String   // "user.create" | "user.delete" | "user.suspend" | "password.reset" | ...
+  targetContent String? @db.Text
+  metadata    String   @db.Text // JSON string
+  ip          String?
+  createdAt   DateTime @default(now())
+
+  @@index([adminId])
+  @@index([targetUserId])
+  @@index([action])
+  @@index([createdAt])
+}
+
+model Notification {
+  id        String   @id @default(cuid())
+  userId    String
+  user      User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  title     String
+  body      String   @db.Text
+  type      String   @default("info") // "info" | "warning" | "error" | "success"
+  read      Boolean  @default(false)
+  createdAt DateTime @default(now())
+
+  @@index([userId])
+  @@index([read])
+}
+
+model SystemSetting {
+  id    String @id @default(cuid())
+  key   String @unique
+  value String @db.Text
+  updatedAt DateTime @updatedAt
+}
+
+// ---------------------------------------------------------------------------
+// DAILY USAGE TRACKING (for upload/download limits)
+// ---------------------------------------------------------------------------
+
+model DailyUsage {
+  id            String   @id @default(cuid())
+  userId        String
+  date          String   // YYYY-MM-DD
+  uploadBytes   BigInt   @default(0)
+  downloadBytes BigInt   @default(0)
+  uploadCount   Int      @default(0)
+  downloadCount Int      @default(0)
+  updatedAt     DateTime @updatedAt
+
+  @@unique([userId, date])
+  @@index([userId])
+  @@index([date])
+}
+
+// ---------------------------------------------------------------------------
+// USER NAV PREFERENCES (customizable mobile navigation)
+// ---------------------------------------------------------------------------
+
+model UserNavPref {
+  id        String   @id @default(cuid())
+  userId    String   @unique
+  // JSON-encoded array of view keys in display order; first 5 are shown as primary
+  primaryItems String @db.VarChar(5000) @default("[]")
+  // JSON-encoded array of view keys hidden from the More menu
+  hiddenItems  String @db.VarChar(5000) @default("[]")
+  // User video settings — preloadVideos defaults to TRUE per requirement #1
+  preloadVideos Boolean @default(true)
+  advancedVideoPlay Boolean @default(true)
+  preferredQuality String @default("auto")
+  autoQuality Boolean @default(true)
+  preBufferLevel String @default("adaptive")
+  dataSaver Boolean @default(false)
+  // Reels/Shorts mode toggle (requirement #1)
+  reelsEnabled Boolean @default(false)
+  // Video rotation preference (degrees: 0, 90, 180, 270)
+  videoRotation Int @default(0)
+  updatedAt DateTime @updatedAt
+}
+

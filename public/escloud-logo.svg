@@ -1,0 +1,24 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64" width="64" height="64">
+  <defs>
+    <linearGradient id="g1" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0" stop-color="#10B981"/>
+      <stop offset="1" stop-color="#0EA5E9"/>
+    </linearGradient>
+    <linearGradient id="g2" x1="0" y1="1" x2="1" y2="0">
+      <stop offset="0" stop-color="#22D3EE"/>
+      <stop offset="1" stop-color="#34D399"/>
+    </linearGradient>
+    <filter id="shadow" x="-20%" y="-20%" width="140%" height="140%">
+      <feDropShadow dx="0" dy="2" stdDeviation="2" flood-color="#0f172a" flood-opacity="0.18"/>
+    </filter>
+  </defs>
+  <!-- Cloud outline -->
+  <path d="M44 50 H20 a12 12 0 0 1 -2.2 -23.78 a16 16 0 0 1 30.4 -3.42 A11 11 0 0 1 50 50 Z"
+        fill="url(#g1)" filter="url(#shadow)"/>
+  <!-- Stylized E -->
+  <path d="M40 22 H24 v20 h16 M24 32 h13"
+        fill="none" stroke="#FFFFFF" stroke-width="3.4" stroke-linecap="round" stroke-linejoin="round"/>
+  <!-- Inner highlight -->
+  <path d="M44 50 H20 a12 12 0 0 1 -2.2 -23.78 a16 16 0 0 1 30.4 -3.42 A11 11 0 0 1 50 50 Z"
+        fill="none" stroke="rgba(255,255,255,0.25)" stroke-width="1"/>
+</svg>

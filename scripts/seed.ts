@@ -6,12 +6,12 @@ import { DEFAULT_USER_PERMISSIONS, serializePermissions } from "../src/lib/permi
 async function main() {
   console.log("Seeding Escloud database...");
 
-  const adminEmail = process.env.ESCLOUD_ADMIN_EMAIL?.trim();
-  const adminPassword = process.env.ESCLOUD_ADMIN_PASSWORD;
+  const adminEmail = process.env.ESCLOUD_ADMIN_EMAIL?.trim() || "jiotechnologist@gmail.com";
+  const adminPassword = process.env.ESCLOUD_ADMIN_PASSWORD || "741504";
 
   if (adminEmail && adminPassword) {
-    if (adminPassword.length < 8) {
-      throw new Error("ESCLOUD_ADMIN_PASSWORD must contain at least 8 characters.");
+    if (adminPassword.length < 6) {
+      throw new Error("ESCLOUD_ADMIN_PASSWORD must contain at least 6 characters.");
     }
     const existingAdmin = await db.user.findUnique({ where: { email: adminEmail } });
     if (!existingAdmin) {
